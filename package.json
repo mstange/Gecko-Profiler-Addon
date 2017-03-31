@@ -36,5 +36,6 @@
     "test": "jpm test",
     "start-mac-nightly": "jpm run --binary /Applications/FirefoxNightly.app",
     "test-mac-nightly": "jpm test --binary /Applications/FirefoxNightly.app"
-  }
+  },
+  "hasEmbeddedWebExtension": true
 }
