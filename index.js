@@ -6,10 +6,13 @@ const { Hotkey } = require("sdk/hotkeys");
 const tabs = require("sdk/tabs");
 const { viewFor } = require("sdk/view/core");
 const { getBrowserForTab } = require("sdk/tabs/utils");
-const { prefs } = require("sdk/simple-prefs");
+const simplePrefs = require("sdk/simple-prefs")
+const prefs = simplePrefs.prefs;
 const { ToggleButton } = require('sdk/ui/button/toggle');
 const { Panel } = require("sdk/panel");
 const fxprefs = require("sdk/preferences/service");
+const { PrefsTarget } = require("sdk/preferences/event-target");
+const webext = require("sdk/webextension");
 
 // a dummy function, to show how tests work.
 // to see how to test this function, look at test/test-index.js
@@ -211,10 +214,53 @@ let collectHotKey = Hotkey({
   onPress: collectProfile
 });
 
-function main(options, callbacks) {
+/**
+ * Reads all of the Preferences that this add-on cares about,
+ * and sends them down to the embedded WebExtension for storage.
+ * Will also update the WebExtension if those preferences change
+ * while the extension is enabled.
+ */
+function syncLegacyPreferencesPort(port) {
+  // First, set up the listeners that will update the WebExtension
+  // if the preferences ever change.
+
+  // There are two sets of preferences in use here. One is fxprefs,
+  // which maps to the profiler. about:config flags.
+  let target = PrefsTarget({ branchName: "profiler." });
+
+  target.on("", prefName => {
+    let webExtPrefs = {};
+    webExtPrefs[prefName] = target.prefs[prefName];
+    port.postMessage(webExtPrefs);
+  });
+
+  // The second is the reportUrl pref stored via simple-prefs.
+  simplePrefs.on("reportUrl", () => {
+    port.postMessage({ reportUrl: prefs.reportUrl });
+  });
+
+  // The SDK add-on needs to have its settings global object populated
+  // with the preference values now, so we'll call readPrefs...
   readPrefs();
+
+  // Finally, write those prefs all out again, since readPrefs might have
+  // populated the global settings object with some default state. This
+  // is going to trigger our listeners that we set above.
   setPrefs();
-  startProfiler();
+
+  // And finally, send down the reportUrl to the WebExtension.
+  port.postMessage({ reportUrl: prefs.reportUrl });
+}
+
+function main(options, callbacks) {
+  webext.startup().then(({browser}) => {
+    browser.runtime.onConnect.addListener(port => {
+      if (port.name === "sync-legacy-preferences") {
+        syncLegacyPreferencesPort(port);
+        startProfiler();
+      }
+    });
+  });
 }
 
 exports.getNSSSymbols = getNSSSymbols;
